@@ -1,0 +1,10 @@
+name=Your Library
+authors=[Your Name](http://yoururl.com), [Another Name](http://anotherurl.com)
+url=http://yourlibraryname.com
+category=Other
+sentence=A collection of utilities for solving this and that problem.
+paragraph= 
+version=1 
+prettyVersion=1.0.0
+minRevision=0
+maxRevision=0

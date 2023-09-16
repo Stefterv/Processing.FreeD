@@ -1,0 +1,159 @@
+// This script adds processing library build support to gradle.
+
+def releaseRoot = "$rootDir/release"
+
+def releaseName = "$libName-$version"
+def releaseDirectory = "$releaseRoot/$releaseName"
+
+// Replace the properties in the source files
+task processSource(type: Sync) {
+    from sourceSets.main.java
+    filter { String line -> line.replaceAll("##library.prettyVersion##", "$libPrettyVersion") }
+    filter { String line -> line.replaceAll("##library.name##", "$libName") } 
+    filter { String line -> line.replaceAll("##author##", "$libAuthors") } 
+    into "$buildDir/src"
+}
+
+compileJava {
+    source = processSource.outputs
+}
+
+task releaseProcessingLib {
+    dependsOn {
+        clean
+        build
+        javadoc
+        jar
+    }
+
+    finalizedBy 'packageRelease', 'renameRelease'
+
+    doFirst {
+        println "releasing library $libName..."
+
+        // Printing current jvm to the console
+        def currentJvm = org.gradle.internal.jvm.Jvm.current()
+        println currentJvm
+
+        println("cleaning release...")
+        project.delete(files(
+                "$releaseDirectory",
+                "$releaseRoot/${releaseName}.zip",
+                "$releaseRoot/${releaseName}.txt"
+        ))
+    }
+
+    doLast {
+        println "creating package..."
+
+        println "copy library..."
+        project.copy {
+            from "$buildDir/libs/${libName}.jar"
+            into "$releaseDirectory/library"
+        }
+
+        println "copy dependencies..."
+        project.copy {
+            from configurations.runtimeClasspath
+            into "$releaseDirectory/library"
+        }
+
+        // Need to delete the Processing jars explicitly, at least when including them as fileTree dependencies
+        for (lib in includeDeps) {
+          delete "$releaseDirectory/library/$lib"
+        }
+
+        println "Copy libraries..."
+        project.copy {
+            from("$releaseDirectory/library") {
+                include "*.jar"
+            }
+            into "libs"
+        }
+
+        println "Copy assets..."
+        project.copy {
+            from("$rootDir") {
+                include "shaders/**",
+                        "native/**"
+            }
+            into "$releaseDirectory/library"
+            exclude "*.DS_Store"
+        }
+
+        println "Copy javadoc..."
+        project.copy {
+            from "$buildDir/docs/javadoc"
+            into "$releaseDirectory/reference"
+        }
+
+        println "Copy additional files..."
+        project.copy {
+            from("$rootDir") {
+                include "README.md",
+                        "readme/**",
+                        "examples/**",
+                        "src/**"
+            }
+            into "$releaseDirectory"
+            exclude "*.DS_Store", "**/networks/**"
+        }
+
+        println "Copy repository library.txt..."
+        copyProperties("$releaseRoot", "${libName}.txt")
+
+        println "Copy repository library.properties..."
+        copyProperties("$releaseDirectory", "library.properties")
+
+        if (project.hasProperty("sketchbookLocation")) {
+            println "Copy to sketchbook..."
+            def installDirectory = "$sketchbookLocation/libraries/$libName"
+            project.copy {
+                from("$releaseDirectory") {
+                    include "library.properties",
+                            "examples/**",
+                            "library/**",
+                            "reference/**",
+                            "src/**"
+                }
+                into "$installDirectory"
+            }
+        }
+    }
+
+    ext.copyProperties = { destDirectory, destFilename ->
+        project.copy {
+            from "$rootDir/resources/library.properties"
+            into "$destDirectory"
+            rename "library.properties", "$destFilename"
+
+            // First remove comment or empty lines
+            filter { String line -> return line.startsWith("#") || !line.strip() ? null : line }
+
+            filter { String line -> line.replaceAll("name=##library.name##", "name=$libPrettyName") }
+            filter { String line -> line.replaceAll("authors=##library.authorList##", "authors=$libAuthors") }
+            filter { String line -> line.replaceAll("url=##library.url##", "url=$libUrl") }
+            filter { String line -> line.replaceAll("categories=##library.categories##", "category=$libCategory") }
+            filter { String line -> line.replaceAll("sentence=##library.sentence##", "sentence=$libSentence") }
+            filter { String line -> line.replaceAll("paragraph=##library.paragraph##", "paragraph=$libParagraph") }
+            filter { String line -> line.replaceAll("version=##library.version##", "version=$libVersion") }
+            filter { String line -> line.replaceAll("prettyVersion=##library.prettyVersion##", "prettyVersion=$libPrettyVersion") }
+            filter { String line -> line.replaceAll("minRevision=##compatible.minRevision##", "minRevision=$compMinRevision") }
+            filter { String line -> line.replaceAll("maxRevision=##compatible.maxRevision##", "maxRevision=$compMaxRevision") }
+        }
+    }
+}
+
+task packageRelease(type: Zip) {    
+    mustRunAfter releaseProcessingLib
+
+    archiveFileName = "${libName}.zip"
+    from "$releaseDirectory"
+    into "$libName"
+    destinationDirectory = file("$releaseRoot")
+    exclude "**/*.DS_Store"
+}
+
+task renameRelease {
+    mustRunAfter packageRelease
+}
